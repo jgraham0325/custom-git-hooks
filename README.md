@@ -1,5 +1,5 @@
 # Description
-Scripts to automtically increment the version number when on team branch
+Scripts to automtically increment the version number when on team branch (project specific concept where snapshot numbers need to be incremented each time)
 
 There is a pre-commit hook that checks artifactory for the latest version and then increments by 1
 
@@ -10,7 +10,7 @@ Run from mac/linux command line: setup-team-branch-version-increment.sh "~/app"
 
 (where ~/app is the root folder of your git repos)
 
-This will then update all of your context repos to use the git hooks in this folder by default
+This will then update all of your git repos to use the git hooks in this folder by default
 
 
 # Testing
