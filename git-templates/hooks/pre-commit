@@ -1,0 +1,89 @@
+#!/bin/bash
+
+#################################################################################
+# Description: Incrementes version in pom files by incrementing latest from Artifactory
+#
+# Usage: not intended to be run directly from command line. Invoked by GIT
+#################################################################################
+
+MAVEN_BIN=`which mvn`
+GROUP_ID=`xmllint --xpath "//*[local-name()='project']/*[local-name()='groupId']/text()" pom.xml`
+GROUP_ID_PATH=${GROUP_ID//./\/}
+ARTIFACT_ID=`xmllint --xpath "//*[local-name()='project']/*[local-name()='artifactId']/text()" pom.xml`
+ARTIFACTORY_URL="<<ARTIFACTORY_PATH_HERE>>${GROUP_ID_PATH}/${ARTIFACT_ID}/maven-metadata.xml"
+
+export http_proxy="<<HTTP PROXY HERE>>"
+
+function exitIfNotTeamBranch() {
+  
+  # Can't use standard approach (git symbolic-ref --short HEAD) since needs to work in detatched head state
+  local CURRENT_BRANCH=`git show -s --pretty=%d HEAD | grep -o 'team\/[a-zA-Z0-9]*' | head -1`
+  if [[ ${CURRENT_BRANCH} != team* ]] ; then 
+    echo "Not on team branch so skipping pom version number increment. "${CURRENT_BRANCH} 
+    exit 0
+  else
+    echo "On team branch (${CURRENT_BRANCH}) so running hook script: "${BASH_SOURCE[0]}
+  fi
+}
+
+function findTeamName(){
+
+  local LOCAL_PROJECT_VERSION=`xmllint --xpath "//*[local-name()='project']/*[local-name()='version']/text()" pom.xml`
+  local TEAM_NAME_REGEX="-([a-zA-Z0-9]*)-SNAPSHOT"
+
+  if [[ ${LOCAL_PROJECT_VERSION} =~ $TEAM_NAME_REGEX ]] ; then 
+    TEAM_NAME=${BASH_REMATCH[1]}
+    echo "Team Name: "$TEAM_NAME
+  else 
+    echo "ERROR: Couldn't find team name in pom.xml version. Version from pom: "${LOCAL_PROJECT_VERSION}
+    exit 1
+  fi
+}
+
+function findLatestArtifactoryVersion() {
+  echo "Detecting latest ${TEAM_NAME}-SNAPSHOT version number from Artifactory..."
+  local ARTIFACTORY_MAVEN_METADATA=`curl -s ${ARTIFACTORY_URL}`
+
+  #find last occurance of ATCM-SNAPSHOT in artifactory versions list
+  LATEST_ARTIFACTORY_VERSION=`xmllint --xpath 'string(//metadata/versioning/versions/version[contains(., '${TEAM_NAME}"-SNAPSHOT"')][last()])' <(echo "$ARTIFACTORY_MAVEN_METADATA")`
+  
+  if [ -z ${LATEST_ARTIFACTORY_VERSION} ] ; then
+      echo "ERROR: Couldn't detect current version from maven-metadata: "${ARTIFACTORY_MAVEN_METADATA}
+      exit 1
+  else
+    echo "Version found: ${LATEST_ARTIFACTORY_VERSION}"
+  fi
+  
+}
+
+function calculateNextProjectVersion() {
+  local VERSION_WITH_NUMBERS_ONLY=`echo ${LATEST_ARTIFACTORY_VERSION} | sed -e 's/[^0-9][^0-9]*$//'`
+  local LAST_NUMBER=`echo ${VERSION_WITH_NUMBERS_ONLY} | sed -e 's/[0-9]*\.//g'`
+  local NEXT_BUILD_NUMBER=`expr ${LAST_NUMBER} + 1`
+  NEXT_PROJECT_VERSION=`echo ${VERSION_WITH_NUMBERS_ONLY} | sed -e "s/[0-9][0-9]*\([^0-9]*\)$/${NEXT_BUILD_NUMBER}-${TEAM_NAME}-SNAPSHOT/"`
+
+  echo "Next project version: ${NEXT_PROJECT_VERSION}"
+}
+
+function updateProjectPomsToNextVersion() {
+  echo "Updating all POM files to version: ${NEXT_PROJECT_VERSION}"
+  ${MAVEN_BIN} -q versions:set -DgenerateBackupPoms=false -DnewVersion=${NEXT_PROJECT_VERSION}
+}
+
+function addVersionChangesToGit() {
+  echo "Adding pom files to commit"
+  git add \*pom.xml
+}
+
+exitIfNotTeamBranch
+findTeamName
+findLatestArtifactoryVersion
+calculateNextProjectVersion
+updateProjectPomsToNextVersion
+addVersionChangesToGit
+
+
+
+
+
+

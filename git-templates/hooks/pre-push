@@ -1,0 +1,52 @@
+#!/bin/bash
+
+#################################################################################
+# Description: Checks Artifactory to ensure there isn't already a team branch snapshot
+# artifact with the same version number. This avoid deployment issues later
+#
+# Usage: not intended to be run directly from command line. Invoked by GIT
+#################################################################################
+
+MAVEN_BIN=`which mvn`
+GROUP_ID=`xmllint --xpath "//*[local-name()='project']/*[local-name()='groupId']/text()" pom.xml`
+GROUP_ID_PATH=${GROUP_ID//./\/}
+ARTIFACT_ID=`xmllint --xpath "//*[local-name()='project']/*[local-name()='artifactId']/text()" pom.xml`
+ARTIFACTORY_URL="<<ARTIFACTORY_PATH_HERE>>/${GROUP_ID_PATH}/${ARTIFACT_ID}/maven-metadata.xml"
+
+export http_proxy=http://10.224.23.8:3128
+
+function exitIfNotTeamBranch() {
+  
+  # Can't use standard approach (git symbolic-ref --short HEAD) since needs to work in detatched head state
+  local CURRENT_BRANCH=`git show -s --pretty=%d HEAD | grep -o 'team\/[a-zA-Z0-9]*' | head -1`
+  if [[ ${CURRENT_BRANCH} != team* ]] ; then 
+    echo "Not on team branch so skipping pom version number increment. Branch: "${CURRENT_BRANCH} 
+    exit 0
+  else
+    echo "On team branch (${CURRENT_BRANCH}) so running script"
+  fi
+}
+
+function checkCurrentLocalVersionNotInArtifactory() {
+  echo "Getting versions from Artifactory"
+  local ARTIFACTORY_MAVEN_METADATA=`curl -s ${ARTIFACTORY_URL}`
+
+  # Faster than using mvn plugin
+  local LOCAL_PROJECT_VERSION=`xmllint --xpath "//*[local-name()='project']/*[local-name()='version']/text()" pom.xml`
+
+  # Check if current version exists in Artifactory versions
+  if [[ ${ARTIFACTORY_MAVEN_METADATA} = *"${LOCAL_PROJECT_VERSION}"* ]]; then
+ 	echo "ERROR: current project version (${LOCAL_PROJECT_VERSION}) in pom.xml already exists in artifactory. Update by running 'git commit --amend'"
+    exit 1
+  else
+  	echo "Successfully checked version number (${LOCAL_PROJECT_VERSION}) doesn't exist in artifactory"  
+  fi
+  
+}
+
+exitIfNotTeamBranch
+checkCurrentLocalVersionNotInArtifactory
+
+
+
+
